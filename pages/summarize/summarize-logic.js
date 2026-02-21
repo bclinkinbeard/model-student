@@ -14,6 +14,7 @@ export async function loadWithFallback(loaderFn, task, models, options) {
 
 export function computeSummaryStats(originalText, summaryText) {
   const countWords = (t) => {
+    if (t == null) return 0;
     const trimmed = t.trim();
     return trimmed === '' ? 0 : trimmed.split(/\s+/).length;
   };

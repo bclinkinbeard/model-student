@@ -27,6 +27,12 @@ describe('formatSentimentResult', () => {
   test('preserves original label string', () => {
     assert.strictEqual(formatSentimentResult([{ label: 'POSITIVE', score: 0.8 }]).label, 'POSITIVE');
   });
+  test('throws on empty array', () => {
+    assert.throws(() => formatSentimentResult([]), { name: 'TypeError' });
+  });
+  test('throws on undefined input', () => {
+    assert.throws(() => formatSentimentResult(undefined), { name: 'TypeError' });
+  });
 });
 
 describe('isInputValid', () => {

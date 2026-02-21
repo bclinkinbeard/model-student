@@ -26,6 +26,18 @@ describe('computeSummaryStats', () => {
     const s = computeSummaryStats('one  two\nthree\t\tfour', 'a');
     assert.strictEqual(s.originalWords, 4);
   });
+  test('handles undefined summaryText without crashing', () => {
+    const s = computeSummaryStats('some text here', undefined);
+    assert.strictEqual(s.summaryWords, 0);
+  });
+  test('handles null summaryText without crashing', () => {
+    const s = computeSummaryStats('some text here', null);
+    assert.strictEqual(s.summaryWords, 0);
+  });
+  test('handles undefined originalText without crashing', () => {
+    const s = computeSummaryStats(undefined, 'a summary');
+    assert.strictEqual(s.originalWords, 0);
+  });
 });
 
 describe('isTooShort', () => {
