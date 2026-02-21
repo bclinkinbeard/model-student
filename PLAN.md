@@ -20,25 +20,55 @@ The voice-notes app establishes a clean pattern we carry forward:
 
 ```
 model-student/
-├── index.html                  ← landing page (static, no JS)
-├── app.css                     ← shared design system + component styles
+├── index.html                      ← landing page (static, no JS)
+├── app.css                         ← shared design system + component styles
 ├── pages/
 │   ├── sentiment/
 │   │   ├── index.html
-│   │   └── sentiment.js
+│   │   ├── sentiment.js            ← thin DOM wiring (imports from logic)
+│   │   └── sentiment-logic.js      ← pure functions (testable in Node)
 │   ├── image-classify/
 │   │   ├── index.html
-│   │   └── image-classify.js
+│   │   ├── image-classify.js
+│   │   └── image-classify-logic.js
 │   └── summarize/
 │       ├── index.html
-│       └── summarize.js
+│       ├── summarize.js
+│       └── summarize-logic.js
 ├── lib/
-│   └── model-loader.js         ← shared lazy-load + caching + progress helper
+│   ├── model-loader.js             ← shared lazy-load + caching + progress
+│   └── model-status.js             ← pure state machine + progress formatting
+├── tests/
+│   ├── unit/
+│   │   ├── model-loader.test.js
+│   │   ├── model-status.test.js
+│   │   ├── sentiment-logic.test.js
+│   │   ├── image-classify-logic.test.js
+│   │   └── summarize-logic.test.js
+│   ├── e2e/
+│   │   ├── landing.spec.js
+│   │   ├── sentiment.spec.js
+│   │   ├── image-classify.spec.js
+│   │   ├── summarize.spec.js
+│   │   ├── helpers/
+│   │   │   └── mock-model.js       ← shared Playwright mock for pipeline
+│   │   └── fixtures/
+│   │       └── test-image.jpg      ← minimal 1x1 JPEG for tests
+│   └── screenshots/                ← visual regression baselines (gitignored)
+├── playwright.config.js
 ├── package.json
 ├── vite.config.js
-├── tests.js
 └── .gitignore
 ```
+
+### Logic / Wiring Split (TDD Architecture)
+
+Each page's JavaScript is split into two files:
+
+- **`*-logic.js`** — Pure functions only: result formatting, input validation, data transformations, constants. Zero DOM or browser API dependencies. Fully testable under `node --test`.
+- **`*.js`** — Thin DOM wiring layer: `querySelector`, `addEventListener`, `innerHTML` mutations, calls to `loadModel` and the pipeline. Tested via E2E (Playwright), not unit tests.
+
+This split is the core TDD enabler — all business logic can have failing tests written before implementation.
 
 ### Key decisions
 
@@ -62,27 +92,37 @@ model-student/
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests.js"
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:e2e": "npx playwright test",
+    "test:e2e:update-screenshots": "npx playwright test --update-snapshots",
+    "test": "npm run test:unit && npm run test:e2e"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.4.0"
   },
   "devDependencies": {
-    "vite": "^6.1.0"
+    "vite": "^6.1.0",
+    "@playwright/test": "^1.50.0",
+    "@axe-core/playwright": "^4.10.0"
   }
 }
 ```
 
 Notes:
-- `"type": "module"` — required for ES module `import`/`export` in all JS files and the test file
+- `"type": "module"` — required for ES module `import`/`export` in all JS files and test files
 - Pin `@huggingface/transformers` to `^3.4.0` (latest stable v3). Do NOT use v4/`@next`
-- No other runtime dependencies needed
+- Unit tests use Node's built-in `node:test` and `node:assert` — no test framework dependency
+- Playwright for E2E, screenshot, and accessibility testing
+- `@axe-core/playwright` for automated WCAG AA accessibility checks
 
 ## .gitignore
 
 ```
 node_modules/
 dist/
+test-results/
+playwright-report/
+tests/screenshots/
 ```
 
 ---
@@ -346,7 +386,7 @@ When loading (inference in progress): replace text with CSS spinner, add `pointe
 
 Default content: upload arrow SVG (32px, `var(--text-secondary)`) + "Drop an image here or click to upload" + "PNG, JPG, WebP" subtitle.
 
-When image is loaded: show `<img>` preview (`max-height: 300px; max-width: 100%; object-fit: contain;`) + "Change image" text link.
+When image is loaded: show `<img>` preview (`max-height: 300px; max-width: 100%; object-fit: contain;`) + "Change image" text link. Clicking "Change image" clears the result area, resets the drop zone to default state, and opens the file picker.
 
 Hidden `<input type="file" accept="image/*">` triggered on click.
 
@@ -670,27 +710,72 @@ Status badge styles:
 ```js
 import { pipeline } from '@huggingface/transformers';
 
-const cache = new Map(); // Same-page dedup only; MPA destroys this on navigation.
-                          // Cross-visit caching is handled by Transformers.js via Cache API.
+// createLoader accepts an injected pipeline function for testability.
+// In production: uses the real pipeline import.
+// In E2E tests: globalThis.__TEST_PIPELINE_FN is set by Playwright's addInitScript.
+// In unit tests: createLoader(mockFn) is called directly.
+export function createLoader(pipelineFn = globalThis.__TEST_PIPELINE_FN || pipeline) {
+  const cache = new Map(); // Same-page dedup only; MPA destroys this on navigation.
+                            // Cross-visit caching is handled by Transformers.js via Cache API.
 
-export async function loadModel(task, model, { onProgress, ...options } = {}) {
-  const key = `${task}::${model}`;
-  if (cache.has(key)) return cache.get(key);
+  return async function loadModel(task, model, { onProgress, ...options } = {}) {
+    const key = `${task}::${model}`;
+    if (cache.has(key)) return cache.get(key);
 
-  const promise = pipeline(task, model, {
-    dtype: 'q8',
-    progress_callback: onProgress || undefined,
-    ...options,
-  }).catch((err) => {
-    console.error(`Failed to load ${task} model (${model}):`, err);
-    cache.delete(key);
-    return null;
-  });
+    const promise = pipelineFn(task, model, {
+      dtype: 'q8',
+      progress_callback: onProgress || undefined,
+      ...options,
+    }).catch((err) => {
+      console.error(`Failed to load ${task} model (${model}):`, err);
+      cache.delete(key);
+      return null;
+    });
 
-  cache.set(key, promise);
-  return promise;
+    cache.set(key, promise);
+    return promise;
+  };
+}
+
+export const loadModel = createLoader();
+```
+
+---
+
+## Model Status State Machine (`lib/model-status.js`)
+
+Pure reducer — no DOM, fully testable.
+
+```js
+export const STATES = { IDLE: 'idle', LOADING: 'loading', READY: 'ready', ERROR: 'error' };
+export const EVENTS = { LOAD_START: 'LOAD_START', LOAD_SUCCESS: 'LOAD_SUCCESS', LOAD_FAILURE: 'LOAD_FAILURE', RETRY: 'RETRY' };
+
+const transitions = {
+  idle:    { LOAD_START: 'loading' },
+  loading: { LOAD_SUCCESS: 'ready', LOAD_FAILURE: 'error' },
+  error:   { RETRY: 'loading' },
+  ready:   {},
+};
+
+export function nextModelStatus(current, event) {
+  return transitions[current]?.[event] ?? current;
+}
+
+export function formatProgress(progressEvent) {
+  if (!progressEvent || progressEvent.status !== 'progress') {
+    return { percent: 0, isIndeterminate: true, file: '' };
+  }
+  return {
+    percent: Math.round(progressEvent.progress),
+    isIndeterminate: false,
+    file: progressEvent.file,
+  };
 }
 ```
+
+Each page's DOM wiring layer imports `nextModelStatus` and `formatProgress` to update the `#model-status` element. The state machine itself is tested in unit tests; the DOM rendering is tested via E2E.
+
+---
 
 ### Progress callback event shapes (from Transformers.js)
 
@@ -724,15 +809,34 @@ const result = await classifier(text);
 
 **Important:** The model is binary (SST-2). It only outputs `POSITIVE` or `NEGATIVE` — there is no neutral class. Display the label and score directly.
 
+#### Result formatting (in `sentiment-logic.js`)
+
+Pure function `formatSentimentResult(rawResult)` takes `[{ label, score }]` and returns a view model:
+
+```js
+// Input:  [{ label: 'POSITIVE', score: 0.921 }]
+// Output: { label: 'POSITIVE', emoji: '😊', colorVar: '--positive', percentText: '92.1%', barWidthPercent: 92.1 }
+```
+
+| Label | Emoji | Color Var |
+|-------|-------|-----------|
+| `POSITIVE` | 😊 | `--positive` |
+| `NEGATIVE` | 😔 | `--negative` |
+
+Percentage precision: **one decimal place** (e.g., `92.1%`). Score of 0.9997 → `100.0%`.
+Bar width: `score * 100` (absolute percentage, not relative).
+
+Also exports `isInputValid(text)` — returns `false` for empty or whitespace-only strings.
+
 #### Result display
 
 Two-column flex inside `.result-area`:
-- Left: emoji + label in large text. `POSITIVE` → green (`var(--positive)`), `NEGATIVE` → red (`var(--negative)`)
-- Right: confidence bar (200px wide, 8px tall) + percentage as monospace text (e.g., "92.1%")
+- Left: emoji + label in large text, colored per `colorVar`
+- Right: confidence bar (200px wide, 8px tall) + percentage as monospace text
 - Below 480px: stack vertically
 
 #### Input validation
-- Disable button when textarea is empty
+- Disable button when textarea is empty (uses `isInputValid`)
 - DistilBERT has a 512-token limit; text beyond is silently truncated — no warning needed
 
 ---
@@ -775,17 +879,34 @@ URL.revokeObjectURL(blobUrl); // Clean up after inference
 
 **Key:** Pass the blob URL string directly to the pipeline. Do NOT pass the File object directly. Revoke the URL after inference.
 
+#### Result formatting (in `image-classify-logic.js`)
+
+Pure function `formatClassificationResults(rawResults)` takes the pipeline output array and returns a view model:
+
+```js
+// Input:  [{ label: 'golden retriever', score: 0.85 }, { label: 'labrador', score: 0.06 }, ...]
+// Output: [{ rank: 1, label: 'golden retriever', score: 0.85, percentText: '85.0%', barWidthPercent: 100, colorVar: '--accent' }, ...]
+```
+
+- Results sorted by score descending, assigned ranks 1-N
+- **Bar width is relative to the top score**: rank 1 is always 100%, others are `(score / topScore) * 100`
+- Rank 1 uses `colorVar: '--accent'`, ranks 2+ use `colorVar: '--info'`
+- Percentage precision: one decimal place (e.g., `85.0%`)
+- Handles fewer than 5 results gracefully (just returns what's there)
+- Handles empty array (returns `[]`)
+
+Also exports `isValidImageFile(file)` — checks `file?.type?.startsWith('image/')`, returns `false` for null/undefined/non-image.
+
 #### Result display — Top-5 Predictions
 
-Each row: rank number + label + bar + percentage
-- Rank 1 bar uses `var(--accent)`, ranks 2-5 use `var(--info)`
+Each row: rank number + label + bar + percentage, with `data-rank` attribute on each row element.
 - Bars animate from 0% to final width on render (`transition: width 0.6s ease`)
 - Rows stagger: each row has `animation-delay: calc(n * 80ms)` for fadeSlideIn
 - Label overflow: `text-overflow: ellipsis; white-space: nowrap`
 - Percentage: monospace font, right-aligned
 
 #### Input validation
-- Check `file.type.startsWith('image/')` before processing; show error for non-images
+- Check via `isValidImageFile(file)` before processing; show "Please upload an image file (JPEG, PNG, etc.)" for non-images
 - No max-size enforcement needed (ViT resizes to 224x224 internally)
 
 ---
@@ -806,7 +927,42 @@ Each row: rank number + label + bar + percentage
 3. If that also fails, fall back to `Xenova/distilbart-cnn-12-6`
 4. Show clear error to user if all attempts fail
 
-Implement the fallback chain in the page's JS, NOT in the shared `loadModel` helper.
+#### Summarization logic (in `summarize-logic.js`)
+
+Exports:
+
+```js
+export const FALLBACK_MODELS = [
+  'Xenova/distilbart-cnn-6-6',
+  'onnx-community/distilbart-cnn-6-6',
+  'Xenova/distilbart-cnn-12-6',
+];
+
+// Tries each model in order; returns { pipeline, model } or null.
+export async function loadWithFallback(loaderFn, task, models, options) {
+  for (const model of models) {
+    const result = await loaderFn(task, model, options);
+    if (result !== null) return { pipeline: result, model };
+  }
+  return null;
+}
+
+// Word counting: text.trim().split(/\s+/).length, empty string → 0.
+export function computeSummaryStats(originalText, summaryText) {
+  const countWords = (t) => { const trimmed = t.trim(); return trimmed === '' ? 0 : trimmed.split(/\s+/).length; };
+  const originalWords = countWords(originalText);
+  const summaryWords = countWords(summaryText);
+  const compressionPercent = originalWords === 0 ? 0 : Math.round((1 - summaryWords / originalWords) * 100);
+  return { originalWords, summaryWords, compressionPercent };
+}
+
+export function isTooShort(text, minWords = 30) {
+  const trimmed = text.trim();
+  return trimmed === '' || trimmed.split(/\s+/).length < minWords;
+}
+```
+
+The fallback chain is implemented in `summarize-logic.js` (testable with mock loader), called by the wiring layer in `summarize.js`.
 
 #### Input
 - `<textarea>` with placeholder: "Paste a long article or text to summarize..."
@@ -830,7 +986,7 @@ Inside `.result-area`:
 
 #### Input validation
 - Disable button when textarea is empty
-- Short text warning: if < 30 words, show "Text may be too short for meaningful summarization" (non-blocking)
+- Short text warning: if < 30 words (per `isTooShort`), show inline message below textarea: "Text may be too short for meaningful summarization" in `var(--warning)` color, `var(--font-size-sm)`. Non-blocking — button remains enabled.
 - DistilBART has a 1024-token input limit; longer text is truncated by the tokenizer
 
 ---
@@ -903,75 +1059,570 @@ Disable the action button during inference to prevent double-clicks.
 
 ## Testing Strategy
 
-### Tier 1: Unit Tests (`node --test tests.js`)
+### Methodology: Red-Green-Refactor TDD
 
-Test `model-loader.js` with a mocked `pipeline` function. The loader uses dependency injection for testability:
+Tests are written **before** implementation at every step. The cycle:
+1. **Red** — write failing tests that define the expected behavior
+2. **Green** — write the minimal code to make tests pass
+3. **Refactor** — clean up while keeping tests green
+
+### Tier 1: Unit Tests (`node --test`)
+
+All unit tests use Node.js built-in `node:test` and `node:assert/strict`. No external test framework.
+
+#### `tests/unit/model-loader.test.js` (7 tests)
 
 ```js
-// model-loader.js exports createLoader for testing
-export function createLoader(pipelineFn = pipeline) {
-  const cache = new Map();
-  return async function loadModel(task, model, { onProgress, ...options } = {}) {
-    // ... uses pipelineFn instead of bare pipeline
-  };
-}
-export const loadModel = createLoader();
+import { describe, test, mock, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { createLoader } from '../../lib/model-loader.js';
+
+describe('model-loader', () => {
+  let fakePipeline, loadModel;
+
+  beforeEach(() => {
+    fakePipeline = mock.fn(async () => ({ classify: () => {} }));
+    loadModel = createLoader(fakePipeline);
+  });
+
+  test('cache hit: same key returns the same promise', async () => {
+    const p1 = loadModel('sentiment-analysis', 'model-a');
+    const p2 = loadModel('sentiment-analysis', 'model-a');
+    assert.strictEqual(p1, p2);
+    assert.strictEqual(fakePipeline.mock.calls.length, 1);
+  });
+
+  test('cache miss: different keys invoke pipeline separately', async () => {
+    await loadModel('sentiment-analysis', 'model-a');
+    await loadModel('image-classification', 'model-b');
+    assert.strictEqual(fakePipeline.mock.calls.length, 2);
+  });
+
+  test('error eviction: failed load removes cache entry for retry', async () => {
+    let calls = 0;
+    const failing = mock.fn(async () => { calls++; if (calls === 1) throw new Error('fail'); return { ok: true }; });
+    const loader = createLoader(failing);
+    const first = await loader('task', 'model');
+    assert.strictEqual(first, null);
+    const second = await loader('task', 'model');
+    assert.notStrictEqual(second, null);
+    assert.strictEqual(failing.mock.calls.length, 2);
+  });
+
+  test('progress forwarding: onProgress mapped to progress_callback', async () => {
+    const onProgress = mock.fn();
+    await loadModel('task', 'model', { onProgress });
+    const opts = fakePipeline.mock.calls[0].arguments[2];
+    assert.strictEqual(opts.progress_callback, onProgress);
+  });
+
+  test('options passthrough: dtype defaults to q8', async () => {
+    await loadModel('task', 'model');
+    const opts = fakePipeline.mock.calls[0].arguments[2];
+    assert.strictEqual(opts.dtype, 'q8');
+  });
+
+  test('options passthrough: additional options are forwarded', async () => {
+    await loadModel('task', 'model', { revision: 'main' });
+    const opts = fakePipeline.mock.calls[0].arguments[2];
+    assert.strictEqual(opts.revision, 'main');
+  });
+
+  test('null return: failed pipeline returns null, does not throw', async () => {
+    const failing = mock.fn(async () => { throw new Error('boom'); });
+    const loader = createLoader(failing);
+    const result = await loader('task', 'model');
+    assert.strictEqual(result, null);
+  });
+});
 ```
 
-Tests:
-- Promise caching: calling twice with same key returns same promise
-- Cache eviction: failed load removes entry so retry works
-- Options passthrough: `dtype` and `progress_callback` are forwarded
-- Null return: failed pipeline returns null, not throws
+#### `tests/unit/model-status.test.js` (8 tests)
 
-### Tier 2: Manual Smoke Tests
+```js
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { nextModelStatus, formatProgress } from '../../lib/model-status.js';
 
-Documented checklist (not automated):
-1. `npm run dev` — each page loads without console errors
-2. Model loads with progress visible for each page
-3. Sentiment: "I love this" → POSITIVE, "This is terrible" → NEGATIVE
-4. Image: known photo produces reasonable top-5 labels
-5. Summarize: long text produces shorter summary with correct stats
-6. Error: disconnect network mid-download → error state + retry works
-7. Error: empty input → button stays disabled
-8. Responsive: 375px viewport still usable
+describe('nextModelStatus', () => {
+  test('idle -> loading on LOAD_START', () => { assert.strictEqual(nextModelStatus('idle', 'LOAD_START'), 'loading'); });
+  test('loading -> ready on LOAD_SUCCESS', () => { assert.strictEqual(nextModelStatus('loading', 'LOAD_SUCCESS'), 'ready'); });
+  test('loading -> error on LOAD_FAILURE', () => { assert.strictEqual(nextModelStatus('loading', 'LOAD_FAILURE'), 'error'); });
+  test('error -> loading on RETRY', () => { assert.strictEqual(nextModelStatus('error', 'RETRY'), 'loading'); });
+  test('ignores invalid transition (ready + LOAD_START)', () => { assert.strictEqual(nextModelStatus('ready', 'LOAD_START'), 'ready'); });
+  test('ignores unknown event', () => { assert.strictEqual(nextModelStatus('idle', 'UNKNOWN'), 'idle'); });
+});
+
+describe('formatProgress', () => {
+  test('returns indeterminate for null event', () => {
+    const r = formatProgress(null);
+    assert.strictEqual(r.isIndeterminate, true);
+    assert.strictEqual(r.percent, 0);
+  });
+  test('extracts percent from progress event', () => {
+    const r = formatProgress({ status: 'progress', file: 'model.onnx', progress: 45.7 });
+    assert.strictEqual(r.percent, 46);
+    assert.strictEqual(r.isIndeterminate, false);
+    assert.strictEqual(r.file, 'model.onnx');
+  });
+});
+```
+
+#### `tests/unit/sentiment-logic.test.js` (11 tests)
+
+```js
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { formatSentimentResult, isInputValid } from '../../pages/sentiment/sentiment-logic.js';
+
+describe('formatSentimentResult', () => {
+  test('positive result has green color var', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'POSITIVE', score: 0.92 }]).colorVar, '--positive');
+  });
+  test('negative result has red color var', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'NEGATIVE', score: 0.85 }]).colorVar, '--negative');
+  });
+  test('positive result has correct emoji', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'POSITIVE', score: 0.5 }]).emoji, '\u{1F60A}');
+  });
+  test('negative result has correct emoji', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'NEGATIVE', score: 0.5 }]).emoji, '\u{1F614}');
+  });
+  test('formats percentage to one decimal place', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'POSITIVE', score: 0.921 }]).percentText, '92.1%');
+  });
+  test('bar width equals score * 100', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'POSITIVE', score: 0.75 }]).barWidthPercent, 75.0);
+  });
+  test('handles near-100% score', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'POSITIVE', score: 0.9997 }]).percentText, '100.0%');
+  });
+  test('preserves original label string', () => {
+    assert.strictEqual(formatSentimentResult([{ label: 'POSITIVE', score: 0.8 }]).label, 'POSITIVE');
+  });
+});
+
+describe('isInputValid', () => {
+  test('empty string is invalid', () => { assert.strictEqual(isInputValid(''), false); });
+  test('whitespace-only is invalid', () => { assert.strictEqual(isInputValid('   \n\t  '), false); });
+  test('non-empty string is valid', () => { assert.strictEqual(isInputValid('hello'), true); });
+});
+```
+
+#### `tests/unit/image-classify-logic.test.js` (16 tests)
+
+```js
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { formatClassificationResults, isValidImageFile } from '../../pages/image-classify/image-classify-logic.js';
+
+describe('formatClassificationResults', () => {
+  const sample = [
+    { label: 'golden retriever', score: 0.85 },
+    { label: 'labrador', score: 0.06 },
+    { label: 'collie', score: 0.04 },
+    { label: 'poodle', score: 0.03 },
+    { label: 'beagle', score: 0.02 },
+  ];
+
+  test('sorts by score descending', () => {
+    const shuffled = [...sample].reverse();
+    const results = formatClassificationResults(shuffled);
+    assert.strictEqual(results[0].label, 'golden retriever');
+  });
+  test('assigns ranks 1 through 5', () => {
+    assert.deepStrictEqual(formatClassificationResults(sample).map(r => r.rank), [1, 2, 3, 4, 5]);
+  });
+  test('rank 1 uses accent color', () => {
+    assert.strictEqual(formatClassificationResults(sample)[0].colorVar, '--accent');
+  });
+  test('ranks 2-5 use info color', () => {
+    formatClassificationResults(sample).slice(1).forEach(r => assert.strictEqual(r.colorVar, '--info'));
+  });
+  test('bar width: rank 1 is 100%, others proportional to top', () => {
+    const raw = [{ label: 'a', score: 0.8 }, { label: 'b', score: 0.4 }, { label: 'c', score: 0.2 }];
+    const results = formatClassificationResults(raw);
+    assert.strictEqual(results[0].barWidthPercent, 100);
+    assert.strictEqual(results[1].barWidthPercent, 50);
+    assert.strictEqual(results[2].barWidthPercent, 25);
+  });
+  test('formats percentage to one decimal place', () => {
+    assert.strictEqual(formatClassificationResults(sample)[0].percentText, '85.0%');
+  });
+  test('handles fewer than 5 results', () => {
+    const results = formatClassificationResults([{ label: 'cat', score: 1.0 }]);
+    assert.strictEqual(results.length, 1);
+    assert.strictEqual(results[0].rank, 1);
+  });
+  test('handles empty array', () => {
+    assert.strictEqual(formatClassificationResults([]).length, 0);
+  });
+});
+
+describe('isValidImageFile', () => {
+  test('accepts image/png', () => { assert.strictEqual(isValidImageFile({ type: 'image/png' }), true); });
+  test('accepts image/jpeg', () => { assert.strictEqual(isValidImageFile({ type: 'image/jpeg' }), true); });
+  test('accepts image/webp', () => { assert.strictEqual(isValidImageFile({ type: 'image/webp' }), true); });
+  test('rejects application/pdf', () => { assert.strictEqual(isValidImageFile({ type: 'application/pdf' }), false); });
+  test('rejects text/plain', () => { assert.strictEqual(isValidImageFile({ type: 'text/plain' }), false); });
+  test('rejects null', () => { assert.strictEqual(isValidImageFile(null), false); });
+  test('rejects undefined', () => { assert.strictEqual(isValidImageFile(undefined), false); });
+  test('rejects object without type', () => { assert.strictEqual(isValidImageFile({}), false); });
+});
+```
+
+#### `tests/unit/summarize-logic.test.js` (14 tests)
+
+```js
+import { describe, test, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { computeSummaryStats, isTooShort, FALLBACK_MODELS, loadWithFallback } from '../../pages/summarize/summarize-logic.js';
+
+describe('computeSummaryStats', () => {
+  test('calculates correct word counts', () => {
+    const s = computeSummaryStats('one two three four five', 'one two');
+    assert.strictEqual(s.originalWords, 5);
+    assert.strictEqual(s.summaryWords, 2);
+  });
+  test('calculates compression percentage', () => {
+    const s = computeSummaryStats('word '.repeat(100).trim(), 'word '.repeat(25).trim());
+    assert.strictEqual(s.compressionPercent, 75);
+  });
+  test('handles empty summary (100% compression)', () => {
+    const s = computeSummaryStats('some text here', '');
+    assert.strictEqual(s.summaryWords, 0);
+    assert.strictEqual(s.compressionPercent, 100);
+  });
+  test('handles empty original (0% compression)', () => {
+    const s = computeSummaryStats('', '');
+    assert.strictEqual(s.originalWords, 0);
+    assert.strictEqual(s.compressionPercent, 0);
+  });
+  test('handles multi-space and newlines in word counting', () => {
+    const s = computeSummaryStats('one  two\nthree\t\tfour', 'a');
+    assert.strictEqual(s.originalWords, 4);
+  });
+});
+
+describe('isTooShort', () => {
+  test('returns true for text under 30 words', () => { assert.strictEqual(isTooShort('hello world', 30), true); });
+  test('returns false for text at 30 words', () => { assert.strictEqual(isTooShort('word '.repeat(30).trim(), 30), false); });
+  test('returns false for text above 30 words', () => { assert.strictEqual(isTooShort('word '.repeat(50).trim(), 30), false); });
+  test('returns true for empty string', () => { assert.strictEqual(isTooShort('', 30), true); });
+});
+
+describe('FALLBACK_MODELS', () => {
+  test('contains exactly 3 models', () => { assert.strictEqual(FALLBACK_MODELS.length, 3); });
+  test('first is Xenova/distilbart-cnn-6-6', () => { assert.strictEqual(FALLBACK_MODELS[0], 'Xenova/distilbart-cnn-6-6'); });
+});
+
+describe('loadWithFallback', () => {
+  test('returns first successful model', async () => {
+    const loader = mock.fn(async () => ({ summarize: () => {} }));
+    const r = await loadWithFallback(loader, 'summarization', FALLBACK_MODELS, {});
+    assert.strictEqual(r.model, 'Xenova/distilbart-cnn-6-6');
+    assert.strictEqual(loader.mock.calls.length, 1);
+  });
+  test('tries next model when first returns null', async () => {
+    let c = 0;
+    const loader = mock.fn(async () => { c++; if (c === 1) return null; return { summarize: () => {} }; });
+    const r = await loadWithFallback(loader, 'summarization', FALLBACK_MODELS, {});
+    assert.strictEqual(r.model, 'onnx-community/distilbart-cnn-6-6');
+  });
+  test('returns null when all models fail', async () => {
+    const loader = mock.fn(async () => null);
+    assert.strictEqual(await loadWithFallback(loader, 'summarization', FALLBACK_MODELS, {}), null);
+    assert.strictEqual(loader.mock.calls.length, 3);
+  });
+});
+```
+
+### Tier 2: E2E Tests (Playwright)
+
+#### E2E Model Mocking Strategy
+
+Real model downloads (67-284 MB) are impractical in tests. Two-layer mocking:
+
+**Layer 1 — JS-level pipeline replacement (primary):**
+`page.addInitScript()` sets `globalThis.__TEST_PIPELINE_FN` before page modules load. The `model-loader.js` picks this up via its default parameter. The mock returns canned results matching the pipeline's real output shape.
+
+**Layer 2 — Network interception (safety net):**
+`page.route('**/*huggingface*/**', ...)` blocks real downloads in case the JS mock fails to inject.
+
+##### `tests/e2e/helpers/mock-model.js`
+
+```js
+export async function mockPipeline(page, task, mockResult) {
+  await page.addInitScript(({ mockResult }) => {
+    globalThis.__TEST_PIPELINE_FN = async (task, model, options) => {
+      if (options?.progress_callback) {
+        options.progress_callback({ status: 'initiate', file: 'model.onnx' });
+        options.progress_callback({ status: 'progress', file: 'model.onnx', progress: 50 });
+        options.progress_callback({ status: 'progress', file: 'model.onnx', progress: 100 });
+        options.progress_callback({ status: 'done', file: 'model.onnx' });
+        options.progress_callback({ status: 'ready' });
+      }
+      return async (input, opts) => mockResult;
+    };
+  }, { mockResult });
+
+  await page.route('**/*huggingface*/**', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  );
+}
+
+export async function mockPipelineFailure(page) {
+  await page.addInitScript(() => {
+    globalThis.__TEST_PIPELINE_FN = async () => { throw new Error('Simulated model loading failure'); };
+  });
+  await page.route('**/*huggingface*/**', route => route.abort('failed'));
+}
+```
+
+#### `tests/e2e/landing.spec.js` (8 tests)
+
+- displays hero title and subtitle
+- renders three experiment cards
+- sentiment card links to `/pages/sentiment/`
+- image classification card links to `/pages/image-classify/`
+- summarize card links to `/pages/summarize/`
+- footer contains Transformers.js link
+- cards navigate to correct pages on click
+- accessibility: no WCAG AA violations (via `@axe-core/playwright`)
+
+#### `tests/e2e/sentiment.spec.js` (8 tests + screenshots)
+
+- shows loading state then ready state (model-status transitions)
+- analyze button disabled until model ready
+- button enables when model ready AND textarea has text
+- full positive flow: type text → click → see POSITIVE result with percentage
+- full negative flow
+- button disabled when textarea is empty
+- error state: model fails to load → error badge
+- back link navigates to landing page
+- **Screenshots:** `sentiment-empty`, `sentiment-result-positive`, `sentiment-error`
+- **Accessibility:** no WCAG AA violations
+
+#### `tests/e2e/image-classify.spec.js` (7 tests + screenshots)
+
+- shows model ready state
+- shows drop zone with upload prompt
+- click-to-upload: selects file via `input[type="file"]`, shows preview
+- full flow: upload image → see top-5 results with rank bars
+- drag and drop: dispatch dragover/drop events with DataTransfer
+- rejects non-image file → error message
+- error state: model fails to load
+- **Screenshots:** `image-classify-empty`, `image-classify-result`
+- **Accessibility:** no WCAG AA violations
+
+#### `tests/e2e/summarize.spec.js` (8 tests + screenshots)
+
+- shows model ready state
+- shows download size warning (~284 MB)
+- button disabled when textarea empty
+- full flow: paste text → summarize → see summary with word count stats
+- short text warning for input under 30 words
+- error state: model fails to load
+- loading state shows progress indicator (uses delayed mock)
+- back link navigates to landing page
+- **Screenshots:** `summarize-empty`, `summarize-result`, `summarize-error`
+- **Accessibility:** no WCAG AA violations
+
+#### Test fixture: `tests/e2e/fixtures/test-image.jpg`
+
+A minimal valid 1x1 pixel JPEG (~107 bytes). Generate during scaffold step:
+
+```js
+import { writeFileSync } from 'node:fs';
+const minimalJpeg = Buffer.from([
+  0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+  0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+  0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+  0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
+  0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20,
+  0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29,
+  0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32,
+  0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01,
+  0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00,
+  0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+  0x09, 0x0A, 0x0B, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F,
+  0x00, 0x7B, 0x94, 0x11, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xD9
+]);
+writeFileSync('tests/e2e/fixtures/test-image.jpg', minimalJpeg);
+```
+
+### Tier 3: Screenshot Testing
+
+Capture visual state at key moments using Playwright's `toHaveScreenshot()`.
+
+| Page | States to Screenshot |
+|------|---------------------|
+| Landing | `empty` (default view) |
+| Sentiment | `empty`, `result-positive`, `result-negative`, `error` |
+| Image Classification | `empty` (drop zone), `result` (top-5 bars), `error` |
+| Summarization | `empty`, `result`, `error` |
+
+Naming convention: `{page}-{state}-{projectName}.png` (project = desktop-chrome or mobile-chrome).
+
+```js
+// Example screenshot test:
+await expect(page).toHaveScreenshot('sentiment-result-positive.png', {
+  maxDiffPixelRatio: 0.01,
+  animations: 'disabled', // Freeze CSS animations for deterministic snapshots
+});
+```
+
+Update baselines: `npm run test:e2e:update-screenshots`
+
+### Tier 4: Accessibility Tests
+
+One axe-core scan per page, integrated into each E2E spec:
+
+```js
+import AxeBuilder from '@axe-core/playwright';
+test('no a11y violations', async ({ page }) => {
+  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
+  expect(results.violations).toEqual([]);
+});
+```
+
+### `playwright.config.js`
+
+```js
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'html',
+
+  snapshotPathTemplate: '{testDir}/../screenshots/{testFileName}/{arg}-{projectName}{ext}',
+  expect: {
+    toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled' },
+  },
+
+  use: {
+    baseURL: 'http://localhost:5173',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+
+  webServer: {
+    command: 'npm run dev',
+    port: 5173,
+    reuseExistingServer: !process.env.CI,
+    timeout: 30000,
+  },
+
+  projects: [
+    { name: 'desktop-chrome', use: { ...devices['Desktop Chrome'] } },
+    { name: 'mobile-chrome', use: { ...devices['Pixel 5'] } },
+  ],
+});
+```
+
+### Test Count Summary
+
+| File | Tests |
+|------|-------|
+| `model-loader.test.js` | 7 |
+| `model-status.test.js` | 8 |
+| `sentiment-logic.test.js` | 11 |
+| `image-classify-logic.test.js` | 16 |
+| `summarize-logic.test.js` | 14 |
+| **Unit Total** | **56** |
+| `landing.spec.js` | 8 |
+| `sentiment.spec.js` | 8 + screenshots |
+| `image-classify.spec.js` | 7 + screenshots |
+| `summarize.spec.js` | 8 + screenshots |
+| **E2E Total** | **31** + screenshots (x2 viewports) |
+| **Grand Total** | **87** tests + screenshot comparisons |
 
 ---
 
-## Implementation Order
+## Implementation Order (TDD — tests before code at every step)
 
-### Step 1: Scaffold
-1. Create `package.json`
-2. Create `.gitignore`
-3. Create `vite.config.js`
-4. Run `npm install`
-5. Create `app.css` with full design system (variables, resets, all component styles)
-6. Create `lib/model-loader.js`
+### Step 1: Scaffold + Core Libraries
+
+**RED** — Write failing tests first:
+- `tests/unit/model-loader.test.js` (7 tests — all fail, module doesn't exist)
+- `tests/unit/model-status.test.js` (8 tests — all fail)
+
+**GREEN** — Minimal code to pass:
+1. Create `package.json`, `.gitignore`, `vite.config.js`
+2. Run `npm install`
+3. Create `lib/model-loader.js` with `createLoader` and `loadModel`
+4. Create `lib/model-status.js` with `nextModelStatus` and `formatProgress`
+5. Run `npm run test:unit` — all 15 tests pass
+
+**Then scaffold** (not TDD — static assets):
+6. Create `app.css` with full design system
 7. Create `index.html` (landing page)
-8. Create empty page directories with `index.html` files
-9. Run `npm run dev` — verify scaffold works, all pages route
+8. Create empty page directories with placeholder `index.html` files
+9. Create `tests/e2e/helpers/mock-model.js`
+10. Create `tests/e2e/fixtures/test-image.jpg`
+11. Install Playwright browsers: `npx playwright install chromium`
+12. Run `npm run dev` — verify scaffold works, all pages route
 
 ### Step 2: Sentiment Page
-1. Write `pages/sentiment/index.html` using canonical template
-2. Write `pages/sentiment/sentiment.js` — eager load, textarea, analyze, result display
-3. Verify full flow works in browser
+
+**RED** — Write failing tests:
+- `tests/unit/sentiment-logic.test.js` (11 tests — fail, module doesn't exist)
+- `tests/e2e/sentiment.spec.js` (8 tests — fail, page is empty)
+
+**GREEN**:
+1. Create `pages/sentiment/sentiment-logic.js` — run unit tests, all 11 pass
+2. Create `pages/sentiment/sentiment.js` + update `pages/sentiment/index.html`
+3. Run E2E tests — all 8 pass
+
+**REFACTOR**: Extract any magic values into named constants.
 
 ### Step 3: Image Classification Page
-1. Write `pages/image-classify/index.html`
-2. Write `pages/image-classify/image-classify.js` — drop zone, file handling, top-5 bars
-3. Verify drag-and-drop + click-to-upload both work
+
+**RED** — Write failing tests:
+- `tests/unit/image-classify-logic.test.js` (16 tests — fail)
+- `tests/e2e/image-classify.spec.js` (7 tests — fail)
+
+**GREEN**:
+1. Create `pages/image-classify/image-classify-logic.js` — unit tests pass
+2. Create `pages/image-classify/image-classify.js` + update HTML
+3. Run E2E tests — all pass
+
+**REFACTOR**: Ensure `formatClassificationResults` handles edge cases.
 
 ### Step 4: Summarization Page
-1. Write `pages/summarize/index.html`
-2. Write `pages/summarize/summarize.js` — fallback chain, size warning, stats
-3. Verify model loads (may need fallback model)
 
-### Step 5: Tests
-1. Write `tests.js` with mocked pipeline tests for model-loader
-2. Run `node --test tests.js` — all pass
+**RED** — Write failing tests:
+- `tests/unit/summarize-logic.test.js` (14 tests — fail)
+- `tests/e2e/summarize.spec.js` (8 tests — fail)
 
-### Step 6: Polish
+**GREEN**:
+1. Create `pages/summarize/summarize-logic.js` — unit tests pass
+2. Create `pages/summarize/summarize.js` + update HTML
+3. Run E2E tests — all pass
+
+**REFACTOR**: Verify fallback chain with real models if possible.
+
+### Step 5: Landing Page E2E + Screenshots
+
+**RED**:
+- `tests/e2e/landing.spec.js` (8 tests — fail or partially fail)
+- Screenshot tests for all pages (no baselines yet)
+
+**GREEN**:
+1. Fix any landing page issues found by E2E tests
+2. Run `npm run test:e2e:update-screenshots` to capture baselines
+3. Run `npm run test:e2e` — all pass including screenshot comparisons
+
+### Step 6: Polish + Full Regression
+
 1. Verify all loading states, error states, animations
-2. Verify responsive design at 375px, 768px, 1024px
-3. Run `npm run build` — verify production output
-4. Run `npm run preview` — verify production build works
+2. Verify responsive design at 375px, 768px, 1024px (mobile-chrome project)
+3. Run `npm run test` — all 87 tests pass
+4. Run `npm run build` — production build succeeds
+5. Run `npm run preview` — production build serves correctly
+6. Review screenshot diffs for visual regressions
