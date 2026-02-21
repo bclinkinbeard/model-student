@@ -12,7 +12,6 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         sentiment: resolve(__dirname, 'pages/sentiment/index.html'),
         'image-classify': resolve(__dirname, 'pages/image-classify/index.html'),
-        summarize: resolve(__dirname, 'pages/summarize/index.html'),
       },
     },
   },

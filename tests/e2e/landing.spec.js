@@ -8,10 +8,10 @@ test.describe('Landing Page', () => {
     await expect(page.locator('.hero-subtitle')).toContainText('Run ML models in your browser');
   });
 
-  test('renders three experiment cards', async ({ page }) => {
+  test('renders two experiment cards', async ({ page }) => {
     await page.goto('/');
     const cards = page.locator('.experiment-card');
-    await expect(cards).toHaveCount(3);
+    await expect(cards).toHaveCount(2);
   });
 
   test('sentiment card links to /pages/sentiment/', async ({ page }) => {
@@ -24,12 +24,6 @@ test.describe('Landing Page', () => {
     await page.goto('/');
     const imageCard = page.locator('.experiment-card').filter({ hasText: 'Image Classification' });
     await expect(imageCard).toHaveAttribute('href', '/pages/image-classify/');
-  });
-
-  test('summarize card links to /pages/summarize/', async ({ page }) => {
-    await page.goto('/');
-    const summarizeCard = page.locator('.experiment-card').filter({ hasText: 'Text Summarization' });
-    await expect(summarizeCard).toHaveAttribute('href', '/pages/summarize/');
   });
 
   test('footer contains Transformers.js link', async ({ page }) => {
