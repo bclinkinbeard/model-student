@@ -1,0 +1,4 @@
+{
+  "buildCommand": "npm run test:unit && npm run build",
+  "outputDirectory": "dist"
+}
