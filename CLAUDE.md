@@ -55,6 +55,7 @@ model-student/
 ├── playwright.config.js
 ├── package.json
 ├── vite.config.js
+├── vercel.json                         # Vercel deployment config
 ├── PLAN.md                             # Full implementation specification
 └── .gitignore
 ```
@@ -69,6 +70,7 @@ npm run test:unit              # Run unit tests: node --test tests/unit/*.test.j
 npm run test:e2e               # Run Playwright E2E tests
 npm run test:e2e:update-screenshots  # Update visual regression baselines
 npm run test                   # Run all tests (unit then E2E)
+npm run test:pre-push          # Unit tests + build (run before every push)
 ```
 
 ## Architecture Conventions
@@ -146,12 +148,19 @@ MPA with separate HTML entry points. Inter-page links use absolute paths with tr
 - Root deployment assumed — no `base` config, absolute paths for assets.
 - All implementation details are specified in `PLAN.md` (1600+ lines). Refer to it for exact UI specs, component markup, CSS, test cases, and model configurations.
 
-## Implementation Order (TDD)
+## Deployment
 
-Follow the 6-step order defined in PLAN.md:
-1. Scaffold: `package.json`, `vite.config.js`, `.gitignore`, `app.css`
-2. Shared libs: `lib/model-loader.js`, `lib/model-status.js` + unit tests
-3. Landing page: `index.html` with design system
-4. Experiment pages: build each with tests (red-green-refactor cycle)
-5. E2E tests with Playwright mocking
-6. Visual regression + accessibility tests
+- **Platform:** Vercel
+- **Config:** `vercel.json` with `trailingSlash: true`, unit tests in `buildCommand`
+- **Pre-push:** Run `npm run test:pre-push` before every `git push`
+- **Pre-deploy:** Vercel runs `npm run test:unit && vite build` — deploy aborts if tests fail
+
+## Implementation Order (TDD — E2E-first)
+
+Follow the 5-step order defined in PLAN.md. E2E tests are integrated from Step 1, not deferred.
+
+1. **Scaffold + Landing E2E baseline:** project config, shared libs (15 unit tests), design system, full landing page with E2E tests (8 tests), experiment page shells with working navigation. `npm run test && npm run build` must pass.
+2. **Sentiment page:** unit tests (11) + E2E tests (8) written together, logic then wiring. Full regression before push.
+3. **Image Classification page:** unit tests (16) + E2E tests (7) together. Full regression before push.
+4. **Summarization page:** unit tests (14) + E2E tests (8) together. Full regression before push.
+5. **Visual regression + accessibility + deploy:** screenshot baselines, a11y sweep, responsive verification, production deploy to Vercel.
