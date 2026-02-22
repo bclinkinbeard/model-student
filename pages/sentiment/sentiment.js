@@ -95,13 +95,17 @@ async function runInference() {
     inferring = false;
     runBtn.textContent = 'Analyze';
     updateButtonState();
+    textInput.focus();
   }
 }
 
 // --- Event listeners ---
 
 textInput.addEventListener('input', updateButtonState);
-runBtn.addEventListener('click', runInference);
+runBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  runInference();
+});
 
 // --- Init: eager model load ---
 startModelLoad();
