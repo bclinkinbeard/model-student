@@ -689,3 +689,91 @@ a:hover {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   11. Image Classification Results
+   ========================================================================== */
+
+.classify-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.classify-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  animation: fadeSlideIn var(--transition-slow) ease both;
+}
+
+.classify-rank {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  min-width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.classify-label {
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 120px;
+  max-width: 180px;
+  flex-shrink: 0;
+}
+
+.classify-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.classify-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width 0.6s ease;
+}
+
+.classify-percent {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  min-width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Image preview in drop zone */
+.change-image-link {
+  background: none;
+  border: none;
+  color: var(--text-link);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  padding: var(--space-1) var(--space-2);
+}
+
+.change-image-link:hover {
+  text-decoration: underline;
+}
+
+/* Error message */
+.error-message {
+  color: var(--negative);
+  font-size: var(--font-size-sm);
+  margin-top: var(--space-2);
+}
+
+/* Classification responsive: reduce bar width below 480px */
+@media (max-width: 479px) {
+  .classify-label {
+    min-width: 80px;
+    max-width: 100px;
+  }
+}
