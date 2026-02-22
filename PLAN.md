@@ -58,6 +58,7 @@ model-student/
 ├── playwright.config.js
 ├── package.json
 ├── vite.config.js
+├── vercel.json                         ← Vercel deployment config
 └── .gitignore
 ```
 
@@ -95,7 +96,8 @@ This split is the core TDD enabler — all business logic can have failing tests
     "test:unit": "node --test tests/unit/*.test.js",
     "test:e2e": "npx playwright test",
     "test:e2e:update-screenshots": "npx playwright test --update-snapshots",
-    "test": "npm run test:unit && npm run test:e2e"
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:pre-push": "npm run test:unit && npm run build"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.4.0"
@@ -1544,85 +1546,223 @@ export default defineConfig({
 
 ---
 
-## Implementation Order (TDD — tests before code at every step)
+## Vercel Deployment
 
-### Step 1: Scaffold + Core Libraries
+### `vercel.json`
 
-**RED** — Write failing tests first:
-- `tests/unit/model-loader.test.js` (7 tests — all fail, module doesn't exist)
-- `tests/unit/model-status.test.js` (8 tests — all fail)
+```json
+{
+  "buildCommand": "npm run test:unit && vite build",
+  "outputDirectory": "dist",
+  "trailingSlash": true,
+  "headers": [
+    {
+      "source": "/(.*).html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}
+```
 
-**GREEN** — Minimal code to pass:
-1. Create `package.json`, `.gitignore`, `vite.config.js`
+Key decisions:
+- **`trailingSlash: true`** — matches our MPA routing convention (`/pages/sentiment/` serves `pages/sentiment/index.html`). Vercel auto-redirects non-trailing-slash requests.
+- **`buildCommand`** — runs unit tests before building. If tests fail, the deploy is aborted. E2E tests are not run in the Vercel build because they require a browser and a running dev server.
+- **No catch-all rewrite** — MPA pages are static files; Vercel serves them by path. A catch-all rewrite to `/index.html` would break multi-page routing.
+- **Cache headers** — HTML is never cached (must-revalidate); hashed assets in `/assets/` are immutable.
+
+### Pre-push Testing
+
+Add a `test:pre-push` script to `package.json`:
+
+```json
+"test:pre-push": "npm run test:unit && npm run build"
+```
+
+Run `npm run test:pre-push` before every `git push` to catch regressions locally. E2E tests (`npm run test:e2e`) should also be run locally before pushing feature branches — they are not included in `test:pre-push` to keep the feedback loop fast, but must pass before merge.
+
+---
+
+## Implementation Order (TDD — E2E-first, tests before code at every step)
+
+The original plan deferred E2E and landing page tests to Steps 5-6. This revision integrates E2E tests from Step 1 so that real user interactions are verified continuously.
+
+**Principles:**
+- E2E infrastructure is established in Step 1 alongside the scaffold
+- The landing page is fully E2E-tested before any experiment page is built
+- Every step ends with `npm run test && npm run build` passing
+- Every push is preceded by a full test run
+- Each experiment page ships with both unit tests and E2E tests in the same step
+
+### Step 1: Scaffold + Core Libraries + Landing Page E2E Baseline
+
+**Goal:** A fully navigable app shell with the design system applied, shared libraries tested, and the landing page verified by E2E tests. This is the foundation — nothing else is built until this baseline is green.
+
+**1a. Project scaffold:**
+1. Create `package.json`, `.gitignore`, `vite.config.js`, `vercel.json`
 2. Run `npm install`
-3. Create `lib/model-loader.js` with `createLoader` and `loadModel`
-4. Create `lib/model-status.js` with `nextModelStatus` and `formatProgress`
-5. Run `npm run test:unit` — all 15 tests pass
+3. Install Playwright browsers: `npx playwright install chromium`
+4. Create `playwright.config.js`
 
-**Then scaffold** (not TDD — static assets):
-6. Create `app.css` with full design system
-7. Create `index.html` (landing page)
-8. Create empty page directories with placeholder `index.html` files
-9. Create `tests/e2e/helpers/mock-model.js`
-10. Create `tests/e2e/fixtures/test-image.jpg`
-11. Install Playwright browsers: `npx playwright install chromium`
-12. Run `npm run dev` — verify scaffold works, all pages route
+**1b. RED — Unit tests for shared libs (15 tests, all fail):**
+- `tests/unit/model-loader.test.js` (7 tests)
+- `tests/unit/model-status.test.js` (8 tests)
 
-### Step 2: Sentiment Page
+**1c. GREEN — Implement shared libs:**
+1. Create `lib/model-loader.js` with `createLoader` and `loadModel`
+2. Create `lib/model-status.js` with `nextModelStatus` and `formatProgress`
+3. Run `npm run test:unit` — all 15 tests pass
 
-**RED** — Write failing tests:
-- `tests/unit/sentiment-logic.test.js` (11 tests — fail, module doesn't exist)
-- `tests/e2e/sentiment.spec.js` (8 tests — fail, page is empty)
+**1d. Design system + page shells:**
+1. Create `app.css` with full design system (CSS variables, resets, component styles)
+2. Create `index.html` (landing page — complete, not a placeholder)
+3. Create experiment page HTML shells — each with the canonical template (sticky header, back link, model-status placeholder, empty input section, disabled action button). These are **real pages with working navigation**, not empty placeholders.
+4. Create `tests/e2e/helpers/mock-model.js`
+5. Create `tests/e2e/fixtures/test-image.jpg`
 
-**GREEN**:
-1. Create `pages/sentiment/sentiment-logic.js` — run unit tests, all 11 pass
-2. Create `pages/sentiment/sentiment.js` + update `pages/sentiment/index.html`
-3. Run E2E tests — all 8 pass
+**1e. RED — Landing page E2E tests (8 tests, fail or partially fail):**
+- `tests/e2e/landing.spec.js`:
+  - displays hero title and subtitle
+  - renders three experiment cards
+  - sentiment card links to `/pages/sentiment/`
+  - image classification card links to `/pages/image-classify/`
+  - summarize card links to `/pages/summarize/`
+  - footer contains Transformers.js link
+  - cards navigate to correct pages on click
+  - accessibility: no WCAG AA violations
 
-**REFACTOR**: Extract any magic values into named constants.
+**1f. GREEN — Fix landing page until all 8 E2E tests pass.**
 
-### Step 3: Image Classification Page
+**1g. Screenshot baselines for landing page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for the landing page
+2. Run `npm run test:e2e` — screenshot comparisons pass
 
-**RED** — Write failing tests:
-- `tests/unit/image-classify-logic.test.js` (16 tests — fail)
-- `tests/e2e/image-classify.spec.js` (7 tests — fail)
+**1h. Verify baseline:**
+1. `npm run test:unit` — 15 pass
+2. `npm run test:e2e` — 8 pass (landing only)
+3. `npm run build` — production build succeeds
+4. Manually verify: click each card, confirm navigation to the correct experiment page shell
+5. Commit and push
 
-**GREEN**:
-1. Create `pages/image-classify/image-classify-logic.js` — unit tests pass
-2. Create `pages/image-classify/image-classify.js` + update HTML
-3. Run E2E tests — all pass
+**Exit criteria for Step 1:** 23 tests pass (15 unit + 8 E2E). Build succeeds. All four pages are navigable. The landing page is fully functional and accessibility-verified.
 
-**REFACTOR**: Ensure `formatClassificationResults` handles edge cases.
+---
 
-### Step 4: Summarization Page
+### Step 2: Sentiment Analysis (unit + E2E together)
 
-**RED** — Write failing tests:
-- `tests/unit/summarize-logic.test.js` (14 tests — fail)
-- `tests/e2e/summarize.spec.js` (8 tests — fail)
+**Goal:** First experiment page fully functional with both tiers of testing.
 
-**GREEN**:
-1. Create `pages/summarize/summarize-logic.js` — unit tests pass
-2. Create `pages/summarize/summarize.js` + update HTML
-3. Run E2E tests — all pass
+**2a. RED — Write all failing tests at once:**
+- `tests/unit/sentiment-logic.test.js` (11 unit tests — fail, module doesn't exist)
+- `tests/e2e/sentiment.spec.js` (8 E2E tests — fail, page has no wiring)
 
-**REFACTOR**: Verify fallback chain with real models if possible.
+**2b. GREEN — Logic layer first, then wiring:**
+1. Create `pages/sentiment/sentiment-logic.js` → run `npm run test:unit` — 26 pass (15 + 11)
+2. Create `pages/sentiment/sentiment.js` + update `pages/sentiment/index.html` with full UI
+3. Run `npm run test:e2e` — 16 pass (8 landing + 8 sentiment)
 
-### Step 5: Landing Page E2E + Screenshots
+**2c. REFACTOR:** Extract magic values into named constants.
 
-**RED**:
-- `tests/e2e/landing.spec.js` (8 tests — fail or partially fail)
-- Screenshot tests for all pages (no baselines yet)
+**2d. Screenshot baselines for sentiment page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for sentiment page (and verify landing baselines still pass)
+2. Run `npm run test:e2e` — all screenshot comparisons pass
 
-**GREEN**:
-1. Fix any landing page issues found by E2E tests
-2. Run `npm run test:e2e:update-screenshots` to capture baselines
-3. Run `npm run test:e2e` — all pass including screenshot comparisons
+**2e. Full regression + push:**
+1. `npm run test` — 34 tests pass (26 unit + 16 E2E, but some E2E may be x2 for mobile/desktop projects)
+2. `npm run build` — succeeds
+3. Commit and push
 
-### Step 6: Polish + Full Regression
+**Exit criteria:** Sentiment page works end-to-end: type text → click Analyze → see result with emoji, color, confidence bar. Model loading states (loading, ready, error) are verified by E2E.
 
-1. Verify all loading states, error states, animations
-2. Verify responsive design at 375px, 768px, 1024px (mobile-chrome project)
-3. Run `npm run test` — all 87 tests pass
-4. Run `npm run build` — production build succeeds
-5. Run `npm run preview` — production build serves correctly
-6. Review screenshot diffs for visual regressions
+---
+
+### Step 3: Image Classification (unit + E2E together)
+
+**Goal:** Second experiment page fully functional.
+
+**3a. RED — Write all failing tests:**
+- `tests/unit/image-classify-logic.test.js` (16 unit tests — fail)
+- `tests/e2e/image-classify.spec.js` (7 E2E tests — fail)
+
+**3b. GREEN — Logic then wiring:**
+1. Create `pages/image-classify/image-classify-logic.js` → `npm run test:unit` — 42 pass
+2. Create `pages/image-classify/image-classify.js` + update HTML with drop zone, preview, results
+3. `npm run test:e2e` — 23 pass (8 + 8 + 7)
+
+**3c. REFACTOR:** Ensure `formatClassificationResults` handles edge cases.
+
+**3d. Screenshot baselines for image classification page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for image classification page (and verify prior baselines still pass)
+2. Run `npm run test:e2e` — all screenshot comparisons pass
+
+**3e. Full regression + push:**
+1. `npm run test` — all pass (42 unit + 23 E2E)
+2. `npm run build` — succeeds
+3. Commit and push
+
+**Exit criteria:** Drop zone works (click-to-upload and drag-and-drop). Image preview shows. Top-5 results render with animated bars. Non-image files are rejected with an error message.
+
+---
+
+### Step 4: Summarization (unit + E2E together)
+
+**Goal:** Third experiment page fully functional with fallback chain.
+
+**4a. RED — Write all failing tests:**
+- `tests/unit/summarize-logic.test.js` (14 unit tests — fail)
+- `tests/e2e/summarize.spec.js` (8 E2E tests — fail)
+
+**4b. GREEN — Logic then wiring:**
+1. Create `pages/summarize/summarize-logic.js` → `npm run test:unit` — 56 pass
+2. Create `pages/summarize/summarize.js` + update HTML with textarea, warning, stats
+3. `npm run test:e2e` — 31 pass (8 + 8 + 7 + 8)
+
+**4c. REFACTOR:** Verify fallback chain with real models if possible.
+
+**4d. Screenshot baselines for summarization page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for summarization page (and verify prior baselines still pass)
+2. Run `npm run test:e2e` — all screenshot comparisons pass
+
+**4e. Full regression + push:**
+1. `npm run test` — all 87 tests pass (56 unit + 31 E2E)
+2. `npm run build` — succeeds
+3. Commit and push
+
+**Exit criteria:** Summarization works with mock pipeline. Short-text warning appears below 30 words. Word count stats and compression percentage display correctly. Fallback model chain is exercised in unit tests.
+
+---
+
+### Step 5: Accessibility + Deploy Verification
+
+**Goal:** Accessibility verified across all pages, production build deployed and verified. (Screenshot baselines were established incrementally in Steps 1–4.)
+
+**5a. Accessibility sweep:**
+1. Verify each E2E spec includes an axe-core a11y scan (landing, sentiment, image-classify, summarize)
+2. Fix any WCAG AA violations found
+
+**5b. Responsive verification:**
+1. Review mobile-chrome project results (Pixel 5 viewport) for all pages
+2. Fix any layout issues at 375px, 480px, 768px breakpoints
+
+**5c. Production deploy verification:**
+1. `npm run test` — all 87 tests pass
+2. `npm run build` — succeeds
+3. `npm run preview` — serve production build locally, manually verify all pages
+4. Review screenshot diffs for visual regressions
+5. Commit, push, and deploy to Vercel
+6. Verify deployed site: all pages load, navigation works, trailing-slash routing correct
+
+**Exit criteria:** All 87 tests pass. Screenshot baselines stored. Zero accessibility violations. Production build deploys and serves correctly on Vercel.
