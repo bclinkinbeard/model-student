@@ -12,7 +12,7 @@ export async function mockPipeline(page, task, mockResult) {
     };
   }, { mockResult });
 
-  await page.route('**/*huggingface*/**', route =>
+  await page.route(/huggingface\.co/, route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   );
 }
@@ -21,5 +21,5 @@ export async function mockPipelineFailure(page) {
   await page.addInitScript(() => {
     globalThis.__TEST_PIPELINE_FN = async () => { throw new Error('Simulated model loading failure'); };
   });
-  await page.route('**/*huggingface*/**', route => route.abort('failed'));
+  await page.route(/huggingface\.co/, route => route.abort('failed'));
 }

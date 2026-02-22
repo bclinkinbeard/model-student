@@ -581,3 +581,111 @@ a:hover {
 }
 
 /* Medium screens: 480px - 768px — auto-fill grid handles 1-2 columns naturally */
+
+/* ==========================================================================
+   9. Model Status Indicators (shared)
+   ========================================================================== */
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-dot--ready {
+  background: var(--positive);
+}
+
+.status-dot--error {
+  background: var(--negative);
+}
+
+.retry-btn {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-sans);
+  color: var(--negative);
+  background: transparent;
+  border: 1px solid var(--negative);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.retry-btn:hover {
+  background: rgba(244, 112, 103, 0.15);
+}
+
+/* ==========================================================================
+   10. Sentiment Result
+   ========================================================================== */
+
+.sentiment-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.sentiment-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.sentiment-emoji {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.sentiment-label-text {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+.sentiment-confidence {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.confidence-bar-track {
+  width: 200px;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width var(--transition-base);
+}
+
+.confidence-percent {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  min-width: 60px;
+  text-align: right;
+}
+
+/* Sentiment responsive: stack vertically below 480px */
+@media (max-width: 479px) {
+  .sentiment-result {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .confidence-bar-track {
+    width: 100%;
+  }
+
+  .sentiment-confidence {
+    width: 100%;
+  }
+}
