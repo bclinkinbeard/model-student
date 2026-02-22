@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Classification — Model Student</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F393;</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="experiment-header">
+    <div class="experiment-header-inner">
+      <a href="/" class="back-link">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="10" y1="3" x2="5" y2="8"/><line x1="5" y1="8" x2="10" y2="13"/>
+        </svg>
+        <span>Experiments</span>
+      </a>
+      <h1 class="experiment-title">Image Classification</h1>
+    </div>
+  </header>
+
+  <main class="experiment-container">
+    <div class="model-status" id="model-status" aria-live="polite"></div>
+    <div class="input-section" id="input-section">
+      <label class="section-label">Upload an image</label>
+      <div class="drop-zone" id="drop-zone">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary)">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p style="color: var(--text-secondary)">Drop an image here or click to upload</p>
+        <p style="color: var(--text-tertiary); font-size: var(--font-size-xs)">PNG, JPG, WebP</p>
+      </div>
+      <input type="file" accept="image/*" id="file-input" hidden />
+    </div>
+    <button class="btn-primary" id="run-btn" disabled>Classify</button>
+    <div id="result-area" aria-live="polite"></div>
+  </main>
+
+  <script type="module" src="./image-classify.js"></script>
+</body>
+</html>

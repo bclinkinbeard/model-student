@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Text Summarization — Model Student</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F393;</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="experiment-header">
+    <div class="experiment-header-inner">
+      <a href="/" class="back-link">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="10" y1="3" x2="5" y2="8"/><line x1="5" y1="8" x2="10" y2="13"/>
+        </svg>
+        <span>Experiments</span>
+      </a>
+      <h1 class="experiment-title">Text Summarization</h1>
+    </div>
+  </header>
+
+  <main class="experiment-container">
+    <div class="model-status" id="model-status" aria-live="polite"></div>
+    <p class="size-warning" style="color: var(--warning); font-size: var(--font-size-sm);">This model requires ~284 MB download on first use</p>
+    <div class="input-section" id="input-section">
+      <label class="section-label" for="text-input">Enter text to summarize</label>
+      <textarea class="textarea" id="text-input" placeholder="Paste a long article or text to summarize..."></textarea>
+    </div>
+    <button class="btn-primary" id="run-btn" disabled>Summarize</button>
+    <div id="result-area" aria-live="polite"></div>
+  </main>
+
+  <script type="module" src="./summarize.js"></script>
+</body>
+</html>

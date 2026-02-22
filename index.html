@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Model Student</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F393;</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <main>
+    <section class="landing-hero">
+      <h1 class="landing-title">Model Student</h1>
+      <p class="landing-subtitle">Run ML models in your browser. No server required.</p>
+    </section>
+
+    <div class="experiment-grid">
+      <a href="/pages/sentiment/" class="experiment-card">
+        <div class="card-icon">🎭</div>
+        <h2 class="card-title">Sentiment Analysis</h2>
+        <p class="card-description">Detect whether text is positive or negative.</p>
+        <span class="card-meta">NLP · ~67 MB</span>
+      </a>
+
+      <a href="/pages/image-classify/" class="experiment-card">
+        <div class="card-icon">🖼️</div>
+        <h2 class="card-title">Image Classification</h2>
+        <p class="card-description">Identify objects in any image with top-5 predictions.</p>
+        <span class="card-meta">Vision · ~88 MB</span>
+      </a>
+
+      <a href="/pages/summarize/" class="experiment-card">
+        <div class="card-icon">📝</div>
+        <h2 class="card-title">Text Summarization</h2>
+        <p class="card-description">Condense long text into a short summary.</p>
+        <span class="card-meta">NLP · ~284 MB</span>
+      </a>
+    </div>
+
+    <footer class="landing-footer">
+      Powered by <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener noreferrer">Transformers.js</a>
+    </footer>
+  </main>
+</body>
+</html>
