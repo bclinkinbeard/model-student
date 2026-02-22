@@ -1646,7 +1646,11 @@ The original plan deferred E2E and landing page tests to Steps 5-6. This revisio
 
 **1f. GREEN — Fix landing page until all 8 E2E tests pass.**
 
-**1g. Verify baseline:**
+**1g. Screenshot baselines for landing page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for the landing page
+2. Run `npm run test:e2e` — screenshot comparisons pass
+
+**1h. Verify baseline:**
 1. `npm run test:unit` — 15 pass
 2. `npm run test:e2e` — 8 pass (landing only)
 3. `npm run build` — production build succeeds
@@ -1672,7 +1676,11 @@ The original plan deferred E2E and landing page tests to Steps 5-6. This revisio
 
 **2c. REFACTOR:** Extract magic values into named constants.
 
-**2d. Full regression + push:**
+**2d. Screenshot baselines for sentiment page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for sentiment page (and verify landing baselines still pass)
+2. Run `npm run test:e2e` — all screenshot comparisons pass
+
+**2e. Full regression + push:**
 1. `npm run test` — 34 tests pass (26 unit + 16 E2E, but some E2E may be x2 for mobile/desktop projects)
 2. `npm run build` — succeeds
 3. Commit and push
@@ -1696,7 +1704,11 @@ The original plan deferred E2E and landing page tests to Steps 5-6. This revisio
 
 **3c. REFACTOR:** Ensure `formatClassificationResults` handles edge cases.
 
-**3d. Full regression + push:**
+**3d. Screenshot baselines for image classification page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for image classification page (and verify prior baselines still pass)
+2. Run `npm run test:e2e` — all screenshot comparisons pass
+
+**3e. Full regression + push:**
 1. `npm run test` — all pass (42 unit + 23 E2E)
 2. `npm run build` — succeeds
 3. Commit and push
@@ -1720,7 +1732,11 @@ The original plan deferred E2E and landing page tests to Steps 5-6. This revisio
 
 **4c. REFACTOR:** Verify fallback chain with real models if possible.
 
-**4d. Full regression + push:**
+**4d. Screenshot baselines for summarization page:**
+1. Run `npm run test:e2e:update-screenshots` to capture baselines for summarization page (and verify prior baselines still pass)
+2. Run `npm run test:e2e` — all screenshot comparisons pass
+
+**4e. Full regression + push:**
 1. `npm run test` — all 87 tests pass (56 unit + 31 E2E)
 2. `npm run build` — succeeds
 3. Commit and push
@@ -1729,23 +1745,19 @@ The original plan deferred E2E and landing page tests to Steps 5-6. This revisio
 
 ---
 
-### Step 5: Visual Regression + Accessibility + Deploy Verification
+### Step 5: Accessibility + Deploy Verification
 
-**Goal:** Screenshot baselines established, accessibility verified across all pages, production build deployed and verified.
+**Goal:** Accessibility verified across all pages, production build deployed and verified. (Screenshot baselines were established incrementally in Steps 1–4.)
 
-**5a. Screenshot baselines:**
-1. Run `npm run test:e2e:update-screenshots` to capture baselines for all pages/states
-2. Run `npm run test:e2e` — screenshot comparisons pass (they match the baselines just captured)
-
-**5b. Accessibility sweep:**
+**5a. Accessibility sweep:**
 1. Verify each E2E spec includes an axe-core a11y scan (landing, sentiment, image-classify, summarize)
 2. Fix any WCAG AA violations found
 
-**5c. Responsive verification:**
+**5b. Responsive verification:**
 1. Review mobile-chrome project results (Pixel 5 viewport) for all pages
 2. Fix any layout issues at 375px, 480px, 768px breakpoints
 
-**5d. Production deploy verification:**
+**5c. Production deploy verification:**
 1. `npm run test` — all 87 tests pass
 2. `npm run build` — succeeds
 3. `npm run preview` — serve production build locally, manually verify all pages
