@@ -34,6 +34,14 @@
     <div id="result-area" aria-live="polite"></div>
   </main>
 
+  <div class="debug-panel">
+    <div class="debug-panel-header">
+      <span class="debug-panel-label">Debug Log</span>
+      <button type="button" class="debug-clear-btn" id="debug-clear">Clear</button>
+    </div>
+    <textarea class="debug-textarea" id="debug-log" readonly aria-label="Debug log output"></textarea>
+  </div>
+
   <script type="module" src="./summarize.js"></script>
 </body>
 </html>
