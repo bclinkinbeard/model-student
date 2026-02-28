@@ -2,6 +2,7 @@
 import { loadModel } from '../../lib/model-loader.js';
 import { STATES, EVENTS, nextModelStatus, formatProgress } from '../../lib/model-status.js';
 import { TASK, MODEL, formatSentimentResult, isInputValid } from './sentiment-logic.js';
+import { debug } from '../../lib/debug-log.js';
 
 const statusEl = document.getElementById('model-status');
 const textInput = document.getElementById('text-input');
@@ -54,12 +55,14 @@ function transition(event) {
 }
 
 async function startModelLoad() {
+  debug(`Loading model: ${TASK} / ${MODEL}`);
   transition(EVENTS.LOAD_START);
   renderStatus(STATES.LOADING);
 
   const pipe = await loadModel(TASK, MODEL, {
     onProgress: (e) => {
       const p = formatProgress(e);
+      if (!p.isIndeterminate) debug(`Progress: ${p.percent}%`);
       const barClass = p.isIndeterminate ? 'progress-bar-fill progress-bar-fill--indeterminate' : 'progress-bar-fill';
       const width = p.isIndeterminate ? '' : `width: ${p.percent}%`;
       renderStatus(STATES.LOADING, `<div class="progress-bar-track"><div class="${barClass}" style="${width}"></div></div>`);
@@ -70,9 +73,11 @@ async function startModelLoad() {
     classifier = pipe;
     transition(EVENTS.LOAD_SUCCESS);
     renderStatus(STATES.READY);
+    debug('Model loaded successfully');
   } else {
     transition(EVENTS.LOAD_FAILURE);
     renderStatus(STATES.ERROR);
+    debug('Model failed to load');
   }
 }
 
@@ -81,6 +86,7 @@ async function startModelLoad() {
 async function runInference() {
   if (!classifier || !isInputValid(textInput.value)) return;
 
+  debug(`Inference started — input length: ${textInput.value.length} chars`);
   inferring = true;
   updateButtonState();
   runBtn.innerHTML = `<span class="spinner"></span> Analyzing…`;
@@ -88,8 +94,10 @@ async function runInference() {
   try {
     const rawResult = await classifier(textInput.value);
     const viewModel = formatSentimentResult(rawResult);
+    debug(`Inference complete — ${viewModel.label} (${viewModel.percentText})`);
     renderResult(viewModel);
   } catch (err) {
+    debug(`Inference error: ${err.message}`);
     resultArea.innerHTML = `<div class="result-area result-area--error">Analysis failed. Please try again.</div>`;
   } finally {
     inferring = false;
