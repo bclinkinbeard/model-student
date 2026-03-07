@@ -132,6 +132,51 @@ test.describe('Sentiment Analysis', () => {
     expect(errors).toHaveLength(0);
   });
 
+  test('clearing text after inference does not crash or reload', async ({ page }) => {
+    await mockPipeline(page, 'sentiment-analysis', POSITIVE_RESULT);
+    await page.goto('/pages/sentiment/');
+
+    // Plant sentinel + track crashes, navigations, and errors
+    await page.evaluate(() => { window.__NO_RELOAD_SENTINEL = true; });
+    const navigations = [];
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) navigations.push(frame.url());
+    });
+    const errors = [];
+    page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+    page.on('pageerror', (err) => errors.push(err.message));
+    let crashed = false;
+    page.on('crash', () => { crashed = true; });
+
+    // Run inference
+    await expect(page.locator('#model-status')).toContainText('Model ready');
+    await page.locator('#text-input').click();
+    await page.keyboard.type('I absolutely loved this movie!');
+    await page.click('#run-btn');
+    await expect(page.locator('#result-area')).toContainText('POSITIVE');
+
+    // Clear the textarea — this is the action that triggered the crash
+    await expect(page.locator('#text-input')).toBeFocused();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await expect(page.locator('#text-input')).toHaveValue('');
+
+    // Pause to let any async crash surface
+    await page.waitForTimeout(500);
+
+    // Page should still be alive
+    expect(crashed).toBe(false);
+    const alive = await page.evaluate(() => window.__NO_RELOAD_SENTINEL);
+    expect(alive).toBe(true);
+    expect(navigations).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+
+    // UI should be in correct state: button disabled, model still ready
+    await expect(page.locator('#run-btn')).toBeDisabled();
+    await expect(page.locator('#model-status')).toContainText('Model ready');
+    await expect(page.locator('#model-status')).toHaveClass(/model-status--ready/);
+  });
+
   test('accessibility: no WCAG AA violations', async ({ page }) => {
     await mockPipeline(page, 'sentiment-analysis', POSITIVE_RESULT);
     await page.goto('/pages/sentiment/');
@@ -139,5 +184,60 @@ test.describe('Sentiment Analysis', () => {
 
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
     expect(results.violations).toEqual([]);
+  });
+});
+
+// --- Real model tests (no mocks, downloads actual ONNX model) ---
+// Run with: npx playwright test -g "real model" --project='desktop-chrome'
+// Requires network access to Hugging Face CDN.
+test.describe('Sentiment Analysis (real model)', () => {
+  test.skip(!!process.env.CI, 'skipped in CI — requires model download');
+
+  test('clearing text after real inference does not crash', async ({ page }) => {
+    test.setTimeout(120_000); // model download + WASM init can be slow
+
+    // No mockPipeline — uses the real @huggingface/transformers pipeline
+    await page.goto('/pages/sentiment/');
+
+    // Track crashes, navigations, and errors from the start
+    await page.evaluate(() => { window.__NO_RELOAD_SENTINEL = true; });
+    const navigations = [];
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) navigations.push(frame.url());
+    });
+    const errors = [];
+    page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+    page.on('pageerror', (err) => errors.push(err.message));
+    let crashed = false;
+    page.on('crash', () => { crashed = true; });
+
+    // Wait for real model to download and load
+    await expect(page.locator('#model-status')).toContainText('Model ready', { timeout: 90_000 });
+
+    // Run real inference
+    await page.locator('#text-input').click();
+    await page.keyboard.type('I absolutely loved this movie!');
+    await page.click('#run-btn');
+    await expect(page.locator('#result-area')).toContainText('POSITIVE', { timeout: 30_000 });
+
+    // Clear the textarea — the action that triggered the crash on Vercel
+    await expect(page.locator('#text-input')).toBeFocused();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await expect(page.locator('#text-input')).toHaveValue('');
+
+    // Wait to let any async WASM crash surface
+    await page.waitForTimeout(2000);
+
+    // Page should still be alive
+    expect(crashed).toBe(false);
+    const alive = await page.evaluate(() => window.__NO_RELOAD_SENTINEL);
+    expect(alive).toBe(true);
+    expect(navigations).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+
+    // UI intact
+    await expect(page.locator('#run-btn')).toBeDisabled();
+    await expect(page.locator('#model-status')).toContainText('Model ready');
   });
 });

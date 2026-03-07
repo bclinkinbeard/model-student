@@ -2,6 +2,7 @@
 import { loadModel } from '../../lib/model-loader.js';
 import { STATES, EVENTS, nextModelStatus, formatProgress } from '../../lib/model-status.js';
 import { TASK, MODEL, formatClassificationResults, isValidImageFile } from './image-classify-logic.js';
+import { debug } from '../../lib/debug-log.js';
 
 const statusEl = document.getElementById('model-status');
 const dropZone = document.getElementById('drop-zone');
@@ -104,9 +105,11 @@ function resetDropZone() {
 function handleFile(file) {
   clearError();
   if (!isValidImageFile(file)) {
+    debug(`Rejected file: ${file.name} (${file.type})`);
     showError('Please upload an image file (JPEG, PNG, etc.)');
     return;
   }
+  debug(`Image selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
   currentFile = file;
   showPreview(file);
   updateButtonState();
@@ -120,12 +123,14 @@ function transition(event) {
 }
 
 async function startModelLoad() {
+  debug(`Loading model: ${TASK} / ${MODEL}`);
   transition(EVENTS.LOAD_START);
   renderStatus(STATES.LOADING);
 
   const pipe = await loadModel(TASK, MODEL, {
     onProgress: (e) => {
       const p = formatProgress(e);
+      if (!p.isIndeterminate) debug(`Progress: ${p.percent}%`);
       const barClass = p.isIndeterminate ? 'progress-bar-fill progress-bar-fill--indeterminate' : 'progress-bar-fill';
       const width = p.isIndeterminate ? '' : `width: ${p.percent}%`;
       renderStatus(STATES.LOADING, `<div class="progress-bar-track"><div class="${barClass}" style="${width}"></div></div>`);
@@ -136,9 +141,11 @@ async function startModelLoad() {
     classifier = pipe;
     transition(EVENTS.LOAD_SUCCESS);
     renderStatus(STATES.READY);
+    debug('Model loaded successfully');
   } else {
     transition(EVENTS.LOAD_FAILURE);
     renderStatus(STATES.ERROR);
+    debug('Model failed to load');
   }
 }
 
@@ -147,6 +154,7 @@ async function startModelLoad() {
 async function runInference() {
   if (!classifier || !currentFile) return;
 
+  debug(`Inference started — file: ${currentFile.name}`);
   inferring = true;
   updateButtonState();
   runBtn.innerHTML = `<span class="spinner"></span> Classifying…`;
@@ -156,8 +164,10 @@ async function runInference() {
   try {
     const rawResult = await classifier(blobUrl, { topk: 5 });
     const viewModel = formatClassificationResults(rawResult);
+    debug(`Inference complete — top result: ${viewModel[0]?.label} (${viewModel[0]?.percentText})`);
     renderResults(viewModel);
   } catch (err) {
+    debug(`Inference error: ${err.message}`);
     console.error('Inference failed:', err);
     resultArea.innerHTML = `<div class="result-area result-area--error">Classification failed. Please try again.</div>`;
   } finally {
