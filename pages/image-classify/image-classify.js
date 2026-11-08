@@ -1,6 +1,6 @@
 // Image classification — DOM wiring layer
 import { loadModel } from '../../lib/model-loader.js';
-import { STATES, EVENTS, nextModelStatus, formatProgress } from '../../lib/model-status.js';
+import { STATES, EVENTS, nextModelStatus, formatProgress, loadEventFor } from '../../lib/model-status.js';
 import { TASK, MODEL, formatClassificationResults, isValidImageFile } from './image-classify-logic.js';
 
 const statusEl = document.getElementById('model-status');
@@ -13,6 +13,7 @@ let modelState = STATES.IDLE;
 let classifier = null;
 let inferring = false;
 let currentFile = null;
+let previewUrl = null;
 
 // Store default drop zone HTML for reset
 const defaultDropZoneHTML = dropZone.innerHTML;
@@ -26,7 +27,7 @@ function renderStatus(state, progressHtml = '') {
   } else if (state === STATES.READY) {
     statusEl.innerHTML = `<span class="status-dot status-dot--ready"></span><span>Model ready</span>`;
   } else if (state === STATES.ERROR) {
-    statusEl.innerHTML = `<span class="status-dot status-dot--error"></span><span>Failed to load model</span><button class="retry-btn" id="retry-btn">Retry</button>`;
+    statusEl.innerHTML = `<span class="status-dot status-dot--error"></span><span>Failed to load model</span><button type="button" class="retry-btn" id="retry-btn">Retry</button>`;
     document.getElementById('retry-btn').addEventListener('click', startModelLoad);
   }
 }
@@ -76,10 +77,18 @@ function clearError() {
 
 // --- File handling ---
 
+function revokePreview() {
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+  }
+}
+
 function showPreview(file) {
-  const blobUrl = URL.createObjectURL(file);
+  revokePreview();
+  previewUrl = URL.createObjectURL(file);
   dropZone.innerHTML = `
-    <img src="${blobUrl}" alt="Uploaded image preview" style="max-height: 300px; max-width: 100%; object-fit: contain;" />
+    <img src="${previewUrl}" alt="Uploaded image preview" style="max-height: 300px; max-width: 100%; object-fit: contain;" />
     <button type="button" class="change-image-link" id="change-image">Change image</button>
   `;
   dropZone.classList.add('drop-zone--has-image');
@@ -92,6 +101,7 @@ function showPreview(file) {
 }
 
 function resetDropZone() {
+  revokePreview();
   dropZone.innerHTML = defaultDropZoneHTML;
   dropZone.classList.remove('drop-zone--has-image');
   currentFile = null;
@@ -120,11 +130,15 @@ function transition(event) {
 }
 
 async function startModelLoad() {
-  transition(EVENTS.LOAD_START);
+  // Ignore duplicate triggers (e.g. double-clicked Retry) while loading or loaded.
+  if (modelState === STATES.LOADING || modelState === STATES.READY) return;
+
+  transition(loadEventFor(modelState));
   renderStatus(STATES.LOADING);
 
   const pipe = await loadModel(TASK, MODEL, {
     onProgress: (e) => {
+      if (modelState !== STATES.LOADING) return;
       const p = formatProgress(e);
       const barClass = p.isIndeterminate ? 'progress-bar-fill progress-bar-fill--indeterminate' : 'progress-bar-fill';
       const width = p.isIndeterminate ? '' : `width: ${p.percent}%`;
@@ -154,7 +168,7 @@ async function runInference() {
   const blobUrl = URL.createObjectURL(currentFile);
 
   try {
-    const rawResult = await classifier(blobUrl, { topk: 5 });
+    const rawResult = await classifier(blobUrl, { top_k: 5 });
     const viewModel = formatClassificationResults(rawResult);
     renderResults(viewModel);
   } catch (err) {

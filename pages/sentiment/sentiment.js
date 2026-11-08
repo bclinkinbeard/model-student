@@ -1,6 +1,6 @@
 // Sentiment analysis — DOM wiring layer
 import { loadModel } from '../../lib/model-loader.js';
-import { STATES, EVENTS, nextModelStatus, formatProgress } from '../../lib/model-status.js';
+import { STATES, EVENTS, nextModelStatus, formatProgress, loadEventFor } from '../../lib/model-status.js';
 import { TASK, MODEL, formatSentimentResult, isInputValid } from './sentiment-logic.js';
 
 const statusEl = document.getElementById('model-status');
@@ -21,7 +21,7 @@ function renderStatus(state, progressHtml = '') {
   } else if (state === STATES.READY) {
     statusEl.innerHTML = `<span class="status-dot status-dot--ready"></span><span>Model ready</span>`;
   } else if (state === STATES.ERROR) {
-    statusEl.innerHTML = `<span class="status-dot status-dot--error"></span><span>Failed to load model</span><button class="retry-btn" id="retry-btn">Retry</button>`;
+    statusEl.innerHTML = `<span class="status-dot status-dot--error"></span><span>Failed to load model</span><button type="button" class="retry-btn" id="retry-btn">Retry</button>`;
     document.getElementById('retry-btn').addEventListener('click', startModelLoad);
   }
 }
@@ -54,11 +54,15 @@ function transition(event) {
 }
 
 async function startModelLoad() {
-  transition(EVENTS.LOAD_START);
+  // Ignore duplicate triggers (e.g. double-clicked Retry) while loading or loaded.
+  if (modelState === STATES.LOADING || modelState === STATES.READY) return;
+
+  transition(loadEventFor(modelState));
   renderStatus(STATES.LOADING);
 
   const pipe = await loadModel(TASK, MODEL, {
     onProgress: (e) => {
+      if (modelState !== STATES.LOADING) return;
       const p = formatProgress(e);
       const barClass = p.isIndeterminate ? 'progress-bar-fill progress-bar-fill--indeterminate' : 'progress-bar-fill';
       const width = p.isIndeterminate ? '' : `width: ${p.percent}%`;
@@ -90,6 +94,7 @@ async function runInference() {
     const viewModel = formatSentimentResult(rawResult);
     renderResult(viewModel);
   } catch (err) {
+    console.error('Inference failed:', err);
     resultArea.innerHTML = `<div class="result-area result-area--error">Analysis failed. Please try again.</div>`;
   } finally {
     inferring = false;

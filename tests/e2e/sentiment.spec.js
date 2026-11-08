@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { mockPipeline, mockPipelineFailure } from './helpers/mock-model.js';
+import { mockPipeline, mockPipelineFailure, mockPipelineFailThenSucceed } from './helpers/mock-model.js';
 
 const POSITIVE_RESULT = [{ label: 'POSITIVE', score: 0.9998 }];
 const NEGATIVE_RESULT = [{ label: 'NEGATIVE', score: 0.9854 }];
@@ -78,6 +78,32 @@ test.describe('Sentiment Analysis', () => {
     const status = page.locator('#model-status');
     await expect(status).toContainText('Failed to load model');
     await expect(status).toHaveClass(/model-status--error/);
+  });
+
+  test('error state stays visible when late progress events arrive', async ({ page }) => {
+    await mockPipelineFailThenSucceed(page, POSITIVE_RESULT);
+    await page.goto('/pages/sentiment/');
+
+    const status = page.locator('#model-status');
+    await expect(status).toHaveClass(/model-status--error/);
+    // Late progress events from the failed attempt must not replace the error UI
+    await page.waitForTimeout(300);
+    await expect(status).toHaveClass(/model-status--error/);
+    await expect(page.locator('#retry-btn')).toBeVisible();
+  });
+
+  test('retry recovers from a failed load and the page is usable', async ({ page }) => {
+    await mockPipelineFailThenSucceed(page, POSITIVE_RESULT);
+    await page.goto('/pages/sentiment/');
+
+    await expect(page.locator('#model-status')).toHaveClass(/model-status--error/);
+    await page.click('#retry-btn');
+    await expect(page.locator('#model-status')).toContainText('Model ready');
+
+    await page.fill('#text-input', 'I love this product!');
+    await expect(page.locator('#run-btn')).toBeEnabled();
+    await page.click('#run-btn');
+    await expect(page.locator('#result-area')).toContainText('POSITIVE');
   });
 
   test('second submission works without page refresh', async ({ page }) => {

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { mockPipeline, mockPipelineFailure } from './helpers/mock-model.js';
+import { mockPipeline, mockPipelineFailure, mockPipelineFailThenSucceed } from './helpers/mock-model.js';
 import path from 'node:path';
 
 const CLASSIFICATION_RESULT = [
@@ -98,6 +98,32 @@ test.describe('Image Classification', () => {
     const status = page.locator('#model-status');
     await expect(status).toContainText('Failed to load model');
     await expect(status).toHaveClass(/model-status--error/);
+  });
+
+  test('error state stays visible when late progress events arrive', async ({ page }) => {
+    await mockPipelineFailThenSucceed(page, CLASSIFICATION_RESULT);
+    await page.goto('/pages/image-classify/');
+
+    const status = page.locator('#model-status');
+    await expect(status).toHaveClass(/model-status--error/);
+    // Late progress events from the failed attempt must not replace the error UI
+    await page.waitForTimeout(300);
+    await expect(status).toHaveClass(/model-status--error/);
+    await expect(page.locator('#retry-btn')).toBeVisible();
+  });
+
+  test('retry recovers from a failed load and the page is usable', async ({ page }) => {
+    await mockPipelineFailThenSucceed(page, CLASSIFICATION_RESULT);
+    await page.goto('/pages/image-classify/');
+
+    await expect(page.locator('#model-status')).toHaveClass(/model-status--error/);
+    await page.click('#retry-btn');
+    await expect(page.locator('#model-status')).toContainText('Model ready');
+
+    await page.setInputFiles('#file-input', TEST_IMAGE);
+    await expect(page.locator('#run-btn')).toBeEnabled();
+    await page.click('#run-btn');
+    await expect(page.locator('#result-area')).toContainText('golden retriever');
   });
 
   test('accessibility: no WCAG AA violations', async ({ page }) => {

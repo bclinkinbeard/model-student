@@ -23,3 +23,28 @@ export async function mockPipelineFailure(page) {
   });
   await page.route(/huggingface\.co/, route => route.abort('failed'));
 }
+
+// First load fails; subsequent loads (via Retry) succeed.
+// The failed attempt keeps emitting progress afterwards, mimicking Transformers.js
+// parallel file downloads that continue after one file (e.g. tokenizer) fails.
+export async function mockPipelineFailThenSucceed(page, mockResult) {
+  await page.addInitScript(({ mockResult }) => {
+    let calls = 0;
+    globalThis.__TEST_PIPELINE_FN = async (task, model, options) => {
+      calls++;
+      if (calls === 1) {
+        const cb = options?.progress_callback;
+        if (cb) {
+          setTimeout(() => cb({ status: 'progress', file: 'model.onnx', progress: 60 }), 50);
+          setTimeout(() => cb({ status: 'progress', file: 'model.onnx', progress: 90 }), 150);
+        }
+        throw new Error('Simulated transient model loading failure');
+      }
+      return async () => mockResult;
+    };
+  }, { mockResult });
+
+  await page.route(/huggingface\.co/, route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  );
+}

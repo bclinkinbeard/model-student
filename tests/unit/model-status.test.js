@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { nextModelStatus, formatProgress } from '../../lib/model-status.js';
+import { nextModelStatus, formatProgress, loadEventFor } from '../../lib/model-status.js';
 
 describe('nextModelStatus', () => {
   test('idle -> loading on LOAD_START', () => { assert.strictEqual(nextModelStatus('idle', 'LOAD_START'), 'loading'); });
@@ -9,6 +9,16 @@ describe('nextModelStatus', () => {
   test('error -> loading on RETRY', () => { assert.strictEqual(nextModelStatus('error', 'RETRY'), 'loading'); });
   test('ignores invalid transition (ready + LOAD_START)', () => { assert.strictEqual(nextModelStatus('ready', 'LOAD_START'), 'ready'); });
   test('ignores unknown event', () => { assert.strictEqual(nextModelStatus('idle', 'UNKNOWN'), 'idle'); });
+});
+
+describe('loadEventFor', () => {
+  test('idle starts with LOAD_START', () => { assert.strictEqual(loadEventFor('idle'), 'LOAD_START'); });
+  test('error restarts with RETRY', () => { assert.strictEqual(loadEventFor('error'), 'RETRY'); });
+  test('retry cycle reaches ready: error -> loading -> ready', () => {
+    const loading = nextModelStatus('error', loadEventFor('error'));
+    assert.strictEqual(loading, 'loading');
+    assert.strictEqual(nextModelStatus(loading, 'LOAD_SUCCESS'), 'ready');
+  });
 });
 
 describe('formatProgress', () => {
